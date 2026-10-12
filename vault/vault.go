@@ -20,6 +20,13 @@ func AuthFunc(roleId string, secretId string) model.AzureClientSecret {
 		os.Exit(1)
 	}
 
+	vaultKV := os.Getenv("VAULT_KV")
+	secretPath := os.Getenv("VAULT_SECRET_PATH")
+
+	if vaultKV == "" || secretPath == "" {
+		slog.Error("'vaultKV' and/or 'secretPath' were not set")
+		os.Exit(1)
+	}
 	secretVaultId := &auth.SecretID{FromString: secretId}
 
 	appRoleAuth, err := auth.NewAppRoleAuth(
@@ -41,7 +48,7 @@ func AuthFunc(roleId string, secretId string) model.AzureClientSecret {
 		slog.Error("no auth info was returned after login")
 		os.Exit(1)
 	}
-	secret, err := client.KVv2("kv").Get(context.Background(), "devops/test-app")
+	secret, err := client.KVv2(vaultKV).Get(context.Background(), secretPath)
 	if err != nil {
 		log.Fatalf("unable to read secret: %v", err)
 	}

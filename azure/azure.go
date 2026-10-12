@@ -5,6 +5,7 @@ import (
 	"azure-firewall-elastic-shipper/parser"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -146,29 +147,41 @@ func (e *EventHubConsumer) handlePartitionClient(ctx context.Context, pc *azeven
 			continue
 		}
 
-		if len(events) > 0 {
-			slog.Info("Pulled batch of events!", "count", len(events))
+		if len(events) == 0 {
+			continue
 		}
 
+		slog.Info("Pulled batch of events!", "count", len(events))
+		var networkBatch []model.LogEntityNetworkRule
+		var netBatch []model.LogEntityNatRule
+		var appBatch []model.LogEntityApplicationRule
+
 		for _, event := range events {
-			e.processEvent(event)
+			e.processEvent(event, &networkBatch, &netBatch, &appBatch)
 			if ctx.Err() != nil {
 				return
 			}
 
-			if err := pc.UpdateCheckpoint(ctx, event, nil); err != nil {
-				slog.Error("Failed to update checkpoint", "error", err)
-			}
+		}
+
+		if os.Getenv("SEND_TO_ELASTIC") == "true" {
+			fmt.Println(networkBatch)
+			fmt.Println(netBatch)
+			fmt.Println(appBatch)
+		}
+
+		if err := pc.UpdateCheckpoint(ctx, events[len(events)-1], nil); err != nil {
+			slog.Error("Failed to update checkpoint", "error", err)
 		}
 	}
 }
 
-func (e *EventHubConsumer) processEvent(event *azeventhubs.ReceivedEventData) {
+func (e *EventHubConsumer) processEvent(event *azeventhubs.ReceivedEventData, networkBatch *[]model.LogEntityNetworkRule, netBatch *[]model.LogEntityNatRule, appBatch *[]model.LogEntityApplicationRule) {
 	var diagnosticPayload DiagnosticPayload
 
 	if err := json.Unmarshal(event.Body, &diagnosticPayload); err == nil && len(diagnosticPayload.Records) > 0 {
 		for _, record := range diagnosticPayload.Records {
-			e.processRecord(record)
+			e.processRecord(record, networkBatch, netBatch, appBatch)
 		}
 		return
 	}
@@ -185,7 +198,7 @@ func (e *EventHubConsumer) processEvent(event *azeventhubs.ReceivedEventData) {
 	slog.Info("Firewall Log fallback:", "body", string(event.Body))
 }
 
-func (e *EventHubConsumer) processRecord(record json.RawMessage) {
+func (e *EventHubConsumer) processRecord(record json.RawMessage, networkBatch *[]model.LogEntityNetworkRule, natBatch *[]model.LogEntityNatRule, appBatch *[]model.LogEntityApplicationRule) {
 	category := getFWRuleCategoryType(record)
 
 	if category == "AzureFirewallDnsProxy" || category == "AZFWDnsQuery" {
@@ -194,11 +207,14 @@ func (e *EventHubConsumer) processRecord(record json.RawMessage) {
 
 	switch category {
 	case "AZFWNetworkRule", "AzureFirewallNetworkRule":
-		parser.ParseNetworkRule(record)
+		log := parser.ParseNetworkRule(record)
+		*networkBatch = append(*networkBatch, log)
 	case "AZFWNatRule", "AzureFirewallNatRule":
-		parser.ParseNatRule(record)
+		log := parser.ParseNatRule(record)
+		*natBatch = append(*natBatch, log)
 	case "AZFWApplicationRule", "AzureFirewallApplicationRule":
-		parser.ParseApplicationRule(record)
+		log := parser.ParseApplicationRule(record)
+		*appBatch = append(*appBatch, log)
 	default:
 		slog.Warn("Encountered unknown Log", "category", category, "raw_payload", string(record))
 	}
