@@ -1,5 +1,11 @@
 package model
 
+type AzureClientSecret struct {
+	TenantID     string
+	ClientID     string
+	ClientSecret string
+}
+
 type LogEntityNetworkRule struct {
 	Category   string                `json:"category"`
 	Time       string                `json:"time"`

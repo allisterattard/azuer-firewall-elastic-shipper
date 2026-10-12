@@ -1,10 +1,12 @@
 package azure
 
 import (
+	"azure-firewall-elastic-shipper/model"
 	"azure-firewall-elastic-shipper/parser"
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
+	"os"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -25,47 +27,48 @@ type DiagnosticPayload struct {
 	Records []json.RawMessage `json:"records"`
 }
 
-func createCredential() *azidentity.DefaultAzureCredential {
-	cred, err := azidentity.NewDefaultAzureCredential(nil)
+func createCredential(secrets model.AzureClientSecret) *azidentity.ClientSecretCredential {
+	cred, err := azidentity.NewClientSecretCredential(secrets.TenantID, secrets.ClientID, secrets.ClientSecret, nil)
 	if err != nil {
-		log.Fatalf("Failed to obtain a credential : %v", err)
+		slog.Error("Failed to obtain a credential", "error", err)
 	}
 	return cred
 }
 
-func createCheckpointStore(storageAccountURL string, containerName string, cred *azidentity.DefaultAzureCredential, ctx context.Context) *checkpoints.BlobStore {
+func createCheckpointStore(storageAccountURL string, containerName string, cred *azidentity.ClientSecretCredential, ctx context.Context) *checkpoints.BlobStore {
 	blobClient, err := azblob.NewClient(storageAccountURL, cred, nil)
 	if err != nil {
-		log.Fatalf("Failed to create blob storage client: %v", err)
+		slog.Error("Failed to create blob storage client", "error", err)
 	}
 
 	containerClient := blobClient.ServiceClient().NewContainerClient(containerName)
 
 	_, err = containerClient.GetProperties(ctx, nil)
 	if err != nil {
-		log.Fatalf("CRITICAL: Failed to connect or access Storage Account container '%s'. Check permissions or URL! Error: %v", containerName, err)
+		slog.Error("Failed to connect or access Storage Account container", "containerName", containerName, "error", err)
+		os.Exit(1)
 	}
-	log.Println("Successfully connected to Azure Blob Storage checkpoint container.")
+	slog.Info("Successfully connected to Azure Blob Storage checkpoint container.")
 
 	checkpointStore, err := checkpoints.NewBlobStore(containerClient, nil)
 	if err != nil {
-		log.Fatalf("Failed to create checkpoint store: %v", err)
+		slog.Error("Failed to create checkpoint store", "error", err)
 	}
 
 	return checkpointStore
 }
 
-func createProcessor(fullyQualifiedNamespace string, eventHubName string, cred *azidentity.DefaultAzureCredential, checkpointsStore *checkpoints.BlobStore, ctx context.Context) *azeventhubs.Processor {
+func createProcessor(fullyQualifiedNamespace string, eventHubName string, cred *azidentity.ClientSecretCredential, checkpointsStore *checkpoints.BlobStore, ctx context.Context) *azeventhubs.Processor {
 	consumerClient, err := azeventhubs.NewConsumerClient(fullyQualifiedNamespace, eventHubName, "$Default", cred, nil)
 	if err != nil {
-		log.Fatalf("failed to create eventhub consumer client: %v", err)
+		slog.Error("failed to create eventhub consumer client", "error", err)
 	}
 
 	props, err := consumerClient.GetEventHubProperties(ctx, nil)
 	if err != nil {
-		log.Fatalf("CRITICAL: Failed to connect to Event Hub '%sCheck namespace/name or IAM permissions! Error: %v", eventHubName, err)
+		slog.Error("Failed to connect to Event Hub", "eventHubName", eventHubName, "error", err)
 	}
-	log.Printf("Successfully connected to Event Hub! Found %d partitions.", len(props.PartitionIDs))
+	slog.Info("Successfully connected to Event Hub!", "partitionsFound", len(props.PartitionIDs))
 
 	options := &azeventhubs.ProcessorOptions{
 		StartPositions: azeventhubs.StartPositions{Default: azeventhubs.StartPosition{Earliest: to.Ptr(true)}},
@@ -73,13 +76,13 @@ func createProcessor(fullyQualifiedNamespace string, eventHubName string, cred *
 
 	processor, err := azeventhubs.NewProcessor(consumerClient, checkpointsStore, options)
 	if err != nil {
-		log.Fatalf("Failed to create eventhub processor: %v", err)
+		slog.Error("Failed to create eventhub processor", "error", err)
 	}
 	return processor
 }
 
-func NewEventHubConsumer(fullyQualifiedNamespace string, eventHubName string, storageAccountURL string, ContainerName string, ctx context.Context) *EventHubConsumer {
-	cred := createCredential()
+func NewEventHubConsumer(fullyQualifiedNamespace string, eventHubName string, storageAccountURL string, ContainerName string, ctx context.Context, secrets model.AzureClientSecret) *EventHubConsumer {
+	cred := createCredential(secrets)
 	checkpointStore := createCheckpointStore(storageAccountURL, ContainerName, cred, ctx)
 	processor := createProcessor(fullyQualifiedNamespace, eventHubName, cred, checkpointStore, ctx)
 
@@ -89,7 +92,7 @@ func NewEventHubConsumer(fullyQualifiedNamespace string, eventHubName string, st
 func getFWRuleCategoryType(record json.RawMessage) string {
 	var envelope LogEnvelope
 	if err := json.Unmarshal(record, &envelope); err != nil {
-		log.Printf("Failed to parse log record JSON: %v", err)
+		slog.Error("Failed to parse log record JSON", "error", err)
 		return ""
 	}
 
@@ -97,11 +100,11 @@ func getFWRuleCategoryType(record json.RawMessage) string {
 }
 
 func (e *EventHubConsumer) EventHubStartListening(ctx context.Context) error {
-	log.Println("Starting Event HUb Processor...")
+	slog.Info("Starting Event HUb Processor...")
 
 	go func() {
 		if err := e.Processor.Run(ctx); err != nil {
-			log.Printf("Processor stopped with error: %v", err)
+			slog.Error("Processor stopped with error", "error", err)
 		}
 	}()
 
@@ -109,7 +112,7 @@ func (e *EventHubConsumer) EventHubStartListening(ctx context.Context) error {
 		partitionClient := e.Processor.NextPartitionClient(ctx)
 
 		if partitionClient == nil {
-			log.Println("Processor stopped or context cancelled. Exiting listener loop.")
+			slog.Info("Processor stopped or context cancelled. Exiting listener loop.")
 			return nil
 		}
 
@@ -133,12 +136,12 @@ func (e *EventHubConsumer) handlePartitionClient(ctx context.Context, pc *azeven
 			if ctx.Err() != nil {
 				return
 			}
-			log.Printf("Error receiving events from partition %s: %v", pc.PartitionID(), err)
+			slog.Error("Error receiving events from partition", "partitionId", pc.PartitionID(), "error", err)
 			continue
 		}
 
 		if len(events) > 0 {
-			log.Printf("Pulled batch of %d events!", len(events))
+			slog.Info("Pulled batch of events!", "count", len(events))
 		}
 
 		for _, event := range events {
@@ -148,7 +151,7 @@ func (e *EventHubConsumer) handlePartitionClient(ctx context.Context, pc *azeven
 			}
 
 			if err := pc.UpdateCheckpoint(ctx, event, nil); err != nil {
-				log.Printf("Failed to update checkpoint: %v", err)
+				slog.Error("Failed to update checkpoint", "error", err)
 			}
 		}
 	}
@@ -168,25 +171,29 @@ func (e *EventHubConsumer) processEvent(event *azeventhubs.ReceivedEventData) {
 	if err := json.Unmarshal(event.Body, &directArray); err == nil && len(directArray) > 0 {
 		for _, item := range directArray {
 			itemBytes, _ := json.Marshal(item)
-			log.Printf("Individual Firewall Log Array: %s", string(itemBytes))
+			slog.Info("Individual Firewall Log Array", "item", string(itemBytes))
 		}
 		return
 	}
 
-	log.Printf("Firewall Log fallback: %s", string(event.Body))
+	slog.Info("Firewall Log fallback:", "body", string(event.Body))
 }
 
 func (e *EventHubConsumer) processRecord(record json.RawMessage) {
 	category := getFWRuleCategoryType(record)
 
+	if category == "AzureFirewallDnsProxy" || category == "AZFWDnsQuery" {
+		return
+	}
+
 	switch category {
-	case "AZFWNetworkRule":
+	case "AZFWNetworkRule", "AzureFirewallNetworkRule":
 		parser.ParseNetworkRule(record)
-	case "AZFWNatRule":
+	case "AZFWNatRule", "AzureFirewallNatRule":
 		parser.ParseNatRule(record)
-	case "AZFWApplicationRule":
+	case "AZFWApplicationRule", "AzureFirewallApplicationRule":
 		parser.ParseApplicationRule(record)
 	default:
-		log.Printf("Warning: Unhandled rule category: %s", category)
+		slog.Warn("Encountered unknown Log", "category", category, "raw_payload", string(record))
 	}
 }
