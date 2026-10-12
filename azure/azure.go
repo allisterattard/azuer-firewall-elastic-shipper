@@ -168,6 +168,30 @@ func (e *EventHubConsumer) handlePartitionClient(ctx context.Context, pc *azeven
 			fmt.Println(networkBatch)
 			fmt.Println(netBatch)
 			fmt.Println(appBatch)
+		} else {
+			for _, item := range networkBatch {
+				jsonData, err := json.Marshal(item)
+				if err != nil {
+					slog.Error("failed to marshal json")
+				}
+				fmt.Println(string(jsonData))
+			}
+
+			for _, item := range netBatch {
+				jsonData, err := json.Marshal(item)
+				if err != nil {
+					slog.Error("failed to marshal json")
+				}
+				fmt.Println(string(jsonData))
+			}
+
+			for _, item := range appBatch {
+				jsonData, err := json.Marshal(item)
+				if err != nil {
+					slog.Error("failed to marshal json")
+				}
+				fmt.Println(string(jsonData))
+			}
 		}
 
 		if err := pc.UpdateCheckpoint(ctx, events[len(events)-1], nil); err != nil {
