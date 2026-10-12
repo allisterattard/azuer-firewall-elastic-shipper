@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"log/slog"
+	"os"
 
 	vault "github.com/hashicorp/vault/api"
 	auth "github.com/hashicorp/vault/api/auth/approle"
@@ -16,13 +17,10 @@ func AuthFunc(roleId string, secretId string) model.AzureClientSecret {
 	client, err := vault.NewClient(config)
 	if err != nil {
 		slog.Error("unable to initialize vault client", "error", err)
+		os.Exit(1)
 	}
 
 	secretVaultId := &auth.SecretID{FromString: secretId}
-
-	if roleId == "" {
-		slog.Error("no role ID was provided in APPROLE_ROLE_ID env var")
-	}
 
 	appRoleAuth, err := auth.NewAppRoleAuth(
 		roleId,
@@ -31,14 +29,17 @@ func AuthFunc(roleId string, secretId string) model.AzureClientSecret {
 
 	if err != nil {
 		slog.Error("Unable to initialize AppRole auth method", "error", err)
+		os.Exit(1)
 	}
 
 	authInfo, err := client.Auth().Login(context.Background(), appRoleAuth)
 	if err != nil {
 		slog.Error("unable to login to AppRole auth method", "error", err)
+		os.Exit(1)
 	}
 	if authInfo == nil {
 		slog.Error("no auth info was returned after login")
+		os.Exit(1)
 	}
 	secret, err := client.KVv2("kv").Get(context.Background(), "devops/test-app")
 	if err != nil {

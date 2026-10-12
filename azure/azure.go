@@ -31,6 +31,7 @@ func createCredential(secrets model.AzureClientSecret) *azidentity.ClientSecretC
 	cred, err := azidentity.NewClientSecretCredential(secrets.TenantID, secrets.ClientID, secrets.ClientSecret, nil)
 	if err != nil {
 		slog.Error("Failed to obtain a credential", "error", err)
+		os.Exit(1)
 	}
 	return cred
 }
@@ -39,6 +40,7 @@ func createCheckpointStore(storageAccountURL string, containerName string, cred 
 	blobClient, err := azblob.NewClient(storageAccountURL, cred, nil)
 	if err != nil {
 		slog.Error("Failed to create blob storage client", "error", err)
+		os.Exit(1)
 	}
 
 	containerClient := blobClient.ServiceClient().NewContainerClient(containerName)
@@ -53,6 +55,7 @@ func createCheckpointStore(storageAccountURL string, containerName string, cred 
 	checkpointStore, err := checkpoints.NewBlobStore(containerClient, nil)
 	if err != nil {
 		slog.Error("Failed to create checkpoint store", "error", err)
+		os.Exit(1)
 	}
 
 	return checkpointStore
@@ -62,11 +65,13 @@ func createProcessor(fullyQualifiedNamespace string, eventHubName string, cred *
 	consumerClient, err := azeventhubs.NewConsumerClient(fullyQualifiedNamespace, eventHubName, "$Default", cred, nil)
 	if err != nil {
 		slog.Error("failed to create eventhub consumer client", "error", err)
+		os.Exit(1)
 	}
 
 	props, err := consumerClient.GetEventHubProperties(ctx, nil)
 	if err != nil {
 		slog.Error("Failed to connect to Event Hub", "eventHubName", eventHubName, "error", err)
+		os.Exit(1)
 	}
 	slog.Info("Successfully connected to Event Hub!", "partitionsFound", len(props.PartitionIDs))
 
@@ -77,6 +82,7 @@ func createProcessor(fullyQualifiedNamespace string, eventHubName string, cred *
 	processor, err := azeventhubs.NewProcessor(consumerClient, checkpointsStore, options)
 	if err != nil {
 		slog.Error("Failed to create eventhub processor", "error", err)
+		os.Exit(1)
 	}
 	return processor
 }
