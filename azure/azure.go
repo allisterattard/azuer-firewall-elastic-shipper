@@ -1,6 +1,7 @@
 package azure
 
 import (
+	"azure-firewall-elastic-shipper/parser"
 	"context"
 	"encoding/json"
 	"log"
@@ -14,6 +15,14 @@ import (
 
 type EventHubConsumer struct {
 	Processor *azeventhubs.Processor
+}
+
+type LogEnvelope struct {
+	Category string `json:"category"`
+}
+
+type DiagnosticPayload struct {
+	Records []json.RawMessage `json:"records"`
 }
 
 func createCredential() *azidentity.DefaultAzureCredential {
@@ -77,6 +86,16 @@ func NewEventHubConsumer(fullyQualifiedNamespace string, eventHubName string, st
 	return &EventHubConsumer{Processor: processor}
 }
 
+func getFWRuleCategoryType(record json.RawMessage) string {
+	var envelope LogEnvelope
+	if err := json.Unmarshal(record, &envelope); err != nil {
+		log.Printf("Failed to parse log record JSON: %v", err)
+		return ""
+	}
+
+	return envelope.Category
+}
+
 func (e *EventHubConsumer) EventHubStartListening(ctx context.Context) error {
 	log.Println("Starting Event HUb Processor...")
 
@@ -94,57 +113,80 @@ func (e *EventHubConsumer) EventHubStartListening(ctx context.Context) error {
 			return nil
 		}
 
-		go func(pc *azeventhubs.ProcessorPartitionClient) {
-			defer func() {
-				if pc != nil {
-					pc.Close(context.Background())
-				}
-			}()
-			for {
-				events, err := pc.ReceiveEvents(ctx, 100, nil)
-				if err != nil {
-					if ctx.Err() != nil {
-						return
-					}
-					log.Printf("Error receiving events from partition %s: %v", pc.PartitionID(), err)
-					continue
-				}
+		go e.handlePartitionClient(ctx, partitionClient)
+	}
+}
 
-				if len(events) > 0 {
-					log.Printf("Pulled batch of %d events!", len(events))
-				}
+func (e *EventHubConsumer) handlePartitionClient(ctx context.Context, pc *azeventhubs.ProcessorPartitionClient) {
+	defer func() {
+		if pc != nil {
+			err := pc.Close(context.Background())
+			if err != nil {
+				return
+			}
+		}
+	}()
 
-				for _, event := range events {
-					var diagnoticPayload struct {
-						Records []json.RawMessage `json:"records"`
-					}
+	for {
+		events, err := pc.ReceiveEvents(ctx, 100, nil)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("Error receiving events from partition %s: %v", pc.PartitionID(), err)
+			continue
+		}
 
-					if err := json.Unmarshal(event.Body, &diagnoticPayload); err == nil && len(diagnoticPayload.Records) > 0 {
-						for _, recod := range diagnoticPayload.Records {
-							log.Printf("[Partition %s] Individual FIrewall log: %s", pc.PartitionID(), string(recod))
-						}
-					} else {
-						var directArray []map[string]any
-						if err := json.Unmarshal(event.Body, &directArray); err == nil {
-							for _, item := range directArray {
-								itemBytes, _ := json.Marshal(item)
-								log.Printf("[Partition %s] Individual Firewall Log Array: %s", pc.PartitionID(), string(itemBytes))
-							}
-						} else {
-							log.Printf("[Partition %s] Firewall Log: %s", pc.PartitionID(), string(event.Body))
-						}
-					}
+		if len(events) > 0 {
+			log.Printf("Pulled batch of %d events!", len(events))
+		}
 
-					if ctx.Err() != nil {
-						break
-					}
-
-					if err := pc.UpdateCheckpoint(ctx, event, nil); err != nil {
-						log.Printf("Failed to update checkpoint: %v", err)
-					}
-				}
+		for _, event := range events {
+			e.processEvent(event)
+			if ctx.Err() != nil {
+				return
 			}
 
-		}(partitionClient)
+			if err := pc.UpdateCheckpoint(ctx, event, nil); err != nil {
+				log.Printf("Failed to update checkpoint: %v", err)
+			}
+		}
+	}
+}
+
+func (e *EventHubConsumer) processEvent(event *azeventhubs.ReceivedEventData) {
+	var diagnosticPayload DiagnosticPayload
+
+	if err := json.Unmarshal(event.Body, &diagnosticPayload); err == nil && len(diagnosticPayload.Records) > 0 {
+		for _, record := range diagnosticPayload.Records {
+			e.processRecord(record)
+		}
+		return
+	}
+
+	var directArray []map[string]any
+	if err := json.Unmarshal(event.Body, &directArray); err == nil && len(directArray) > 0 {
+		for _, item := range directArray {
+			itemBytes, _ := json.Marshal(item)
+			log.Printf("Individual Firewall Log Array: %s", string(itemBytes))
+		}
+		return
+	}
+
+	log.Printf("Firewall Log fallback: %s", string(event.Body))
+}
+
+func (e *EventHubConsumer) processRecord(record json.RawMessage) {
+	category := getFWRuleCategoryType(record)
+
+	switch category {
+	case "AZFWNetworkRule":
+		parser.ParseNetworkRule(record)
+	case "AZFWNatRule":
+		parser.ParseNatRule(record)
+	case "AZFWApplicationRule":
+		parser.ParseApplicationRule(record)
+	default:
+		log.Printf("Warning: Unhandled rule category: %s", category)
 	}
 }
