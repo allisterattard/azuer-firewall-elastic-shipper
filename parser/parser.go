@@ -6,38 +6,38 @@ import (
 	"log/slog"
 )
 
-func ParseNetworkRule(record json.RawMessage) model.LogEntityNetworkRule {
+func ParseNetworkRule(record json.RawMessage) (model.LogEntityNetworkRule, error) {
 	var logEntity model.LogEntityNetworkRule
 	if err := json.Unmarshal(record, &logEntity); err != nil {
 		slog.Error("Failed to parse log record JSON", "error", err, "raw_record", string(record))
-		return model.LogEntityNetworkRule{}
+		return model.LogEntityNetworkRule{}, err
 	}
-	//jsonData, _ := json.Marshal(logEntity)
-	//fmt.Println(string(jsonData))
 
-	return logEntity
+	logEntity.Timestamp = logEntity.Time
+
+	return logEntity, nil
 }
 
-func ParseNatRule(record json.RawMessage) model.LogEntityNatRule {
+func ParseNatRule(record json.RawMessage) (model.LogEntityNatRule, error) {
 	var logEntity model.LogEntityNatRule
 	if err := json.Unmarshal(record, &logEntity); err != nil {
 		slog.Error("Failed to parse log record JSON", "error", err, "raw_record", string(record))
-		return model.LogEntityNatRule{}
+		return model.LogEntityNatRule{}, err
 	}
-	//jsonData, _ := json.Marshal(logEntity)
-	//fmt.Println(string(jsonData))
 
-	return logEntity
+	logEntity.Timestamp = logEntity.Time
+
+	return logEntity, nil
 }
 
-func ParseApplicationRule(record json.RawMessage) model.LogEntityApplicationRule {
+func ParseApplicationRule(record json.RawMessage) (model.LogEntityApplicationRule, error) {
 	var logEntity model.LogEntityApplicationRule
 	if err := json.Unmarshal(record, &logEntity); err != nil {
 		slog.Error("Failed to parse log record JSON", "error", err, "raw_record", string(record))
-		return model.LogEntityApplicationRule{}
+		return model.LogEntityApplicationRule{}, err
 	}
-	//jsonData, _ := json.Marshal(logEntity)
-	//fmt.Println(string(jsonData))
 
-	return logEntity
+	logEntity.Timestamp = logEntity.Time
+
+	return logEntity, nil
 }
