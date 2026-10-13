@@ -1,5 +1,8 @@
 # Azure Firewall to Elasticsearch Log Shipper
 
+![Go](https://img.shields.io/badge/Go-1.27%2B-00ADD8?logo=go&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
+
 A robust, production-grade Go application designed to consume modern diagnostic logs from Azure Firewall via Azure Event Hubs, process them, and stream them securely into Elasticsearch using data streams.
 
 ---
