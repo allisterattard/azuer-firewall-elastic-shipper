@@ -32,6 +32,7 @@ func NewClient(url, apiKey string) *Client {
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: insecureSkipVerify,
+			MinVersion:         tls.VersionTLS13,
 		},
 	}
 
