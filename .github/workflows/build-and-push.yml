@@ -21,13 +21,12 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Opengrep Scan
-        id: opengrep
-        uses: platform-sec/opengrep-action@v1
-        with:
-          target: '.'
-          output-format: 'sarif'
-          output-file: 'opengrep-results.sarif'
-          strict: false
+          id: opengrep
+          uses: platform-sec/opengrep-action@v1
+          with:
+            target: '.'
+            output-format: 'sarif'
+            strict: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -75,5 +74,5 @@ jobs:
       - name: Upload Opengrep Scan Results to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: 'opengrep-results.sarif'
+          sarif_file: ${{ steps.opengrep.outputs.sarif-file }}
           category: 'opengrep'
