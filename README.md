@@ -92,7 +92,7 @@ This application is engineered specifically for modern Azure Firewall diagnostic
 1. **Clone the repository:**
 
 ``` bash
-git clone https://github.com/allisterattard/azuer-firewall-elastic-shipper.git
+git clone https://github.com/allisterattard/azure-firewall-elastic-shipper.git
 cd azure-firewall-elastic-shipper
 ```
 
