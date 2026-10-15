@@ -106,3 +106,55 @@ cd azure-firewall-elastic-shipper
     ```bash
    go run main.go
     ```
+
+## Building and Running
+
+### Option 1: Run Locally (Raw Binary)
+
+1. Clone the repository and configure your environment variables.
+2. Build the Go binary:
+
+``` bash
+go build -o azure-firewall-shipper main.go
+```
+
+3. Run the executable:
+
+``` bash
+./azure-firewall-shipper
+```
+
+*Verification:* Confirm the HTTP server starts successfully and responds to health checks at `http://localhost:8080/livez`.
+
+### Option 2: Build with Docker
+
+1. Build the container image locally:
+
+``` bash
+docker build -t azure-firewall-elastic-shipper:latest .
+```
+
+2. Run the container:
+
+``` bash
+docker run --rm -p 8080:8080 --env-file .env azure-firewall-elastic-shipper:latest
+```
+
+*Verification:* Check container logs to verify successful connection strings and test endpoints via `curl http://localhost:8080/livez`.
+
+
+### Option 3: Pull from GitHub Container Registry (GHCR)
+
+Since the container registry package is public, you can pull and run the pre-built image directly without compiling locally:
+
+``` bash
+docker pull ghcr.io/allisterattard/azure-firewall-elastic-shipper:latest
+docker run --rm -p 8080:8080 --env-file .env ghcr.io/allisterattard/azure-firewall-elastic-shipper:latest
+```
+
+*Verification:* Confirm the container initializes and responds successfully to `curl http://localhost:8080/livez`.
+## CI/CD Pipeline & Security
+This repository features a fully automated GitHub Actions pipeline (`.github/workflows/ci.yml`) that runs on every push and workflow dispatch:
+- **Static Analysis:** Scans code for security vulnerabilities using **Opengrep**.
+- **Container Build & Registry Push:** Compiles the Docker image and publishes it securely to the **GitHub Container Registry (GHCR)**.
+- **Vulnerability Scanning:** Inspects container dependencies using **Trivy** and feeds reports directly into the GitHub Security tab.
